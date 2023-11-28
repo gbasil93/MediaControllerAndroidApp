@@ -1,0 +1,389 @@
+####################################################
+####################################################
+####################################################
+######Utility Media Controller Broadcast BGS #######
+####################################################
+####################################################
+####################################################
+
+const PS_KEY_LATENCY = $8000
+const MAX_ERASE_PAGE = 64
+const TICK = 1638 # 20 ticks to one second since our clock is at 32768
+
+
+const BUTTON_KEY_DOWN = 1
+const BUTTON_KEY_UP = 2
+
+#temporary variables
+dim button_tmp(3)
+dim iterator
+
+# configuration values
+dim return_value
+dim len
+
+#device values
+dim version(5)
+dim mac_addr(6)
+dim name(20)
+dim adv_data(24)    # custom advertisement data
+dim sr_data(20)     # custom scan response data (friendly name for active scanning)
+
+
+#battery result
+dim batresult
+
+#state variables
+dim button_status
+
+dim advertising_counter # number of ticks advertising
+dim advertising # if we are advertising
+dim led_counter # number of ticks showing LED 
+dim led_on # if the led is on
+dim turn_led_on # toggle to turn on the leds
+dim read_battery
+dim message_id
+
+dim timer_running
+
+# -------------------------------
+# Configure Device Name
+# -------------------------------
+procedure setup_device_name()
+    #Get local BT address
+    call system_address_get()(mac_addr(0:6))
+
+    # Update the device_name to include the last 4 digits of the mac address
+    
+    name(19:1) = (mac_addr(0:1)&$f) + 48 + ((mac_addr(0:1)&$f )/10*7)
+    name(18:1) = (mac_addr(0:1)/$10)+ 48 + ((mac_addr(0:1)/$10)/10*7)
+    name(17:1) = (mac_addr(1:1)&$f) + 48 + ((mac_addr(1:1)&$f )/10*7)
+    name(16:1) = (mac_addr(1:1)/$10) + 48 + ((mac_addr(1:1)/$10)/10*7)
+
+    name(0:16) = "BodyWorn Remote "
+    call attributes_write(c_device_name, 0, 20, name(0:20))
+end
+
+# -------------------------------
+# Configure Firmware Version
+# -------------------------------
+procedure setup_firmware_version()
+    version(0:5) = "1.3.0"
+    call attributes_write(c_firmware_version, 0, 5, version(0:5))
+end
+
+# -------------------------------
+# Setup LED
+# -------------------------------
+procedure setup_led()
+	# Configure port 0.6, 0.7 as output
+	call hardware_io_port_config_direction(0, $C0)
+
+    # Write 0 so they are initially off
+	call hardware_io_port_write(0, $C0, 0)
+end
+
+
+# -------------------------------
+# Setup Buttons
+# -------------------------------
+procedure setup_buttons()
+	# enable interrupt on port 0 pins 0-5 rising edge
+
+    # (parameters are port=0, bitmask=0b00111111, edge=falling)
+    call hardware_io_port_config_irq(0, $3F, 1)
+
+    # enable interrupt on port 1 pins 0-5 rising
+    call hardware_io_port_config_irq(1, $3F, 0)
+end
+
+
+# -------------------------------
+# Toggle Recording LED
+# -------------------------------
+procedure toggle_red_led(enable)
+	if enable = 1 then
+		call hardware_io_port_write(0, $80, $80)
+	end if
+	if enable = 0 then
+		call hardware_io_port_write(0, $80, 0)
+	end if
+end
+
+# -------------------------------
+# Toggle Connection LED
+# -------------------------------
+procedure toggle_green_led(enable)
+    if enable = 1 then
+        call hardware_io_port_write(0, $40, $40)
+    end if
+    if enable = 0 then
+        call hardware_io_port_write(0, $40, 0)
+    end if
+end
+
+# -------------------------------
+# Toggle Recording LED
+# -------------------------------
+procedure toggle_orange_led(enable)
+    if enable = 1 then
+        call hardware_io_port_write(0, $C0, $C0)
+    end if
+    if enable = 0 then
+        call hardware_io_port_write(0, $C0, 0)
+    end if
+end
+
+
+# -------------------------------
+# Write enhanced button value to GATT
+# -------------------------------
+procedure write_button_value_enhanced(button_value, button_state)
+    
+    if message_id > 255 then
+        message_id = 0
+    end if
+    message_id = message_id + 1
+    # put button value in payload
+    #button_tmp(0:1) = button_value
+
+    # put battery value in payload
+    #button_tmp(1:1) = batresult
+
+    # put button state in payload
+    #button_tmp(2:1) = button_state
+
+    # write value to GATT database
+    #call attributes_write(c_button_status_enhanced,0,3,button_tmp(0:3))
+
+     # flags for discoverable/connectable
+    adv_data(0:1) = $02 # ad field length = 2 bytes
+    adv_data(1:1) = gap_ad_type_flags   # ad field type = 0x01 (Flags)
+    adv_data(2:1) = $06 # flags = 0x06, connectable/undirected
+    #adv_data(2:1) = gap_scannable_non_connectable
+
+    # tx power field advertisement, iOS apps may need this v
+    adv_data(3:1) = $02 # ad field length = 2 bytes
+    adv_data(4:1) = gap_ad_type_txpower    # ad field type = 0x0A (TX Power)
+    adv_data(5:1) = $03 # TX power in dBm
+    # NOTE: TX power is a signed 8-bit value, and is not changed automatically
+    # when using "hardware_set_txpower(<power>)". This may be anywhere from -23
+    # to +3 based on your settings. Negative values may be converted to two's
+    # complement form by adding 256, so for example -23 dBm would be 233 or $E9.
+
+    # custom manufacturer
+    adv_data(6:1) = $07 # ad field length 7 bytes (Field type byte, identifier 2 bytes, ignition, io
+    adv_data(7:1) = $ff # ad field type = 0xFF (Manufacturer Specific Data)
+    adv_data(8:1) = $ff # unknown/prototype Company Identifier Code - octet 2
+    adv_data(9:1) = $ff # unknown/prototype Company Identifier Code - octet 1
+
+    # build sensor info
+    adv_data(10:1) = button_value
+    adv_data(11:1) = batresult
+    adv_data(12:1) = button_state
+    adv_data(13:1) = message_id
+
+    # set custom advertisement data
+    advertising_counter = 0
+    call gap_set_adv_data(0, 14, adv_data(0:14)) # 0-sets type as adv data,adv data length,data to send
+end
+
+
+# -------------------------------------------------------------------
+# Build Scan Response
+# -------------------------------------------------------------------
+
+procedure build_response()
+    sr_data(0:1) = $0E  # ad field length = 14 bytes (0x0E)
+    sr_data(1:1) = gap_ad_type_localname_complete   # ad field type = 0x09 (Complete local name)
+    sr_data(2:13) = "Media Control"
+
+    # write custom device name to local GATT attribute
+    call attributes_write(c_device_name, 0, 13, sr_data(2:13))
+
+    # set custom scan response data (i.e. the Device Name value)
+    call gap_set_adv_data(1, 15, sr_data(0:15))
+
+end
+
+# -------------------------------------------------------------------
+# Enable Advertising
+# -------------------------------------------------------------------
+procedure enable_advertising()
+    advertising = 1
+    # set advertisement interval to 12.5-25 ms, use all advertisement channels
+    # (note min/max parameters are in units of 625 uSec)
+    call gap_set_adv_parameters(80, 80, 7) #min time,max time,channels to adv on
+
+
+    # put module into discoverable/connectable mode (with user-defined advertisement data)
+    call gap_set_mode(gap_user_data, gap_scannable_non_connectable) #discover? (user defined), connect?
+end
+
+# -------------------------------------------------------------------
+# Toggle advertising
+# -------------------------------------------------------------------
+procedure disable_advertising()
+      # turn off
+      call gap_set_mode(0, 0) #discover,connect 0, non discoverable, 0 not connectable
+end
+
+#
+# Turns the led on based on battery life
+#
+procedure turn_led_on()
+    if batresult > 66 then
+        call toggle_green_led(1)
+    else 
+        if batresult > 33 then
+            call toggle_orange_led(1)
+        else
+            call toggle_red_led(1)
+        end if 
+    end if
+end
+
+
+
+# -------------------------------------------------------------------
+# Does work every tick
+# -------------------------------------------------------------------
+procedure time_tick()
+    # Disable the advertising after two ticks
+    if advertising = 1 then
+        advertising_counter = advertising_counter + 1
+        if advertising_counter > 20 then
+            call disable_advertising()
+            advertising = 0
+            advertising_counter = 0
+        end if
+    end if
+
+    if turn_led_on then
+        call turn_led_on()
+        led_on = 1
+        turn_led_on = 0
+    end if 
+
+    if led_on = 1 then
+        led_counter = led_counter + 1
+        if led_counter > 2 then
+            call toggle_orange_led(0)
+            led_on = 0
+            led_counter = 0
+        end if 
+    end if 
+
+    if advertising = 0 then
+        if led_on = 0  then  
+            call hardware_set_soft_timer(0, 1, 0) # stop the timer
+            timer_running = 0
+        end if 
+    end if 
+end
+
+
+# -------------------------------
+# System boot event
+# -------------------------------
+event system_boot(major, minor, patch, build, ll_version, protocol, hw)
+
+    # Erase internal flash dedicated for OTA
+    # For this to work, the script timeout has to be increased from the default
+    # value in application configuration file (config.xml)
+    iterator = 0
+
+    while iterator < MAX_ERASE_PAGE
+        call flash_erase_page(iterator)
+        iterator = iterator + 1
+    end while
+
+    # use the MAC address to give this device a unique name
+    call setup_device_name()
+
+    # Configure LED for output
+    call setup_led()
+
+    # Configure Buttons for input
+    call setup_buttons()
+
+    # set firmware version
+    call setup_firmware_version()
+
+    # Set scan response
+    call build_response()
+end
+
+
+# -------------------------------
+# Callback when a button is pressed
+# -------------------------------
+event hardware_io_port_status(timestamp, port, irq, state)
+    # Write the old way of reporting buttons
+    #call write_button_value(state)
+
+    #last press = button_status
+
+    # Process buttons the new way
+    # If key down
+    if (state & irq) = 0 then        
+
+        # State on key down is every bit is high except for the one that was pressed, the one that is pressed is low
+        # so state is 0xff xored with the state (for status it is 0xFD) which = 0x02, and it with $3f 
+        # since we only support 6 buttons so if we get a 0xBF ^ 0xFF = (0x40 & 0x3f) = 0 
+        # since we do not have a 7th sensor
+
+        button_status = (state ^ $ff) & $3f
+
+        # Write the key down event
+        call write_button_value_enhanced(button_status, BUTTON_KEY_DOWN)
+
+        # Check if the current button(s) trigger status indicator
+        if button_status = 2 then
+            turn_led_on = 1
+        end if
+
+        
+    else
+        # uses the previous button status since we do not get a state on key up that can be parsed into a button event
+        call write_button_value_enhanced(button_status, BUTTON_KEY_UP)
+    end if
+
+    #the call to write_button_value_enhanced makes a call to gap_set_adv_data which defines the gap_user_data used in
+    # advertising via gap_set_mode
+    if(timer_running = 0)
+        call enable_advertising()
+        # our clock is 32768 so 32768/20 = 1638 which gives us 40 ticks in a second, this will run until stopped
+        call hardware_set_soft_timer(1638, 1, 0) #######______######------######------######______######
+    end if
+
+    # request a new battery read
+    call hardware_adc_read(15,3,0)
+
+end
+
+
+# -------------------------------
+# Callback when adc is read
+# -------------------------------
+event hardware_adc_result(input,value)
+    #scale value to range 0-100
+    #measurement range is 32768=1.15v*3=3.45V
+    #new battery ADC measurement is 20912=2.52v
+    #minimum battery voltage is 2.0 volts=2.0v/3.45v*32768= 18996
+    #20912-18996=1916
+
+    batresult = (value - 17616) * 100 / (26426 - 17616)
+
+    #clip to 100%
+    if batresult>100 then
+        batresult=100
+    end if
+    if batresult<0 then
+        batresult=0
+    end if
+end
+
+event hardware_soft_timer(handle)
+    call time_tick()
+end

@@ -1,0 +1,91 @@
+<?xml version="1.0" encoding="utf-8"?>
+<RelativeLayout
+    xmlns:android="http://schemas.android.com/apk/res/android"
+    android:orientation="vertical"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    >
+
+    <TextView
+        android:layout_width="wrap_content"
+        android:maxWidth="256dp"
+        android:layout_height="wrap_content"
+        android:layout_centerHorizontal="true"
+        android:textSize="20sp"
+        android:id="@+id/dialog_notification_title"
+        android:layout_marginTop="5dp"
+        android:layout_marginBottom="5dp"
+        android:text="Test Title"
+        />
+
+    <View
+        android:layout_width="match_parent"
+        android:layout_height="1dp"
+        android:background="@color/uaGold"
+        android:id="@+id/dialog_notification_divider"
+        android:layout_below="@id/dialog_notification_title"
+    />
+
+    <TextView
+        android:layout_width="wrap_content"
+        android:maxWidth="256dp"
+        android:layout_height="wrap_content"
+        android:layout_centerHorizontal="true"
+        android:gravity="center"
+        android:textSize="18sp"
+        android:layout_below="@id/dialog_notification_divider"
+        android:id="@+id/dialog_notification_message"
+        android:text="Test Message"
+        android:layout_marginTop="5dp"
+        android:layout_marginBottom="10dp"
+        />
+
+
+    <View
+        android:layout_width="match_parent"
+        android:layout_height="1dp"
+        android:background="@color/uaGrey"
+        android:id="@+id/dialog_notification_button_divider"
+        android:layout_below="@id/dialog_notification_message"
+        />
+
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_centerHorizontal="true"
+
+        android:id="@+id/dialog_notification_button_layout"
+        android:layout_below="@id/dialog_notification_button_divider"
+        android:orientation="horizontal"
+        android:weightSum="1.0"
+        >
+
+
+
+        <Button
+            android:layout_weight=".5"
+            android:layout_width="0dip"
+            android:layout_height="wrap_content"
+            android:background="?android:attr/selectableItemBackground"
+            android:id="@+id/dialog_notification_cancel_button"
+            />
+
+        <View
+            android:layout_width="1dp"
+            android:layout_height="match_parent"
+            android:background="@color/uaGrey"
+            android:id="@+id/dialog_notification_button_divider_middle"
+            android:layout_below="@id/dialog_notification_title"
+            />
+
+
+        <Button
+            android:layout_weight=".5"
+            android:layout_width="0dip"
+            android:layout_height="wrap_content"
+            android:background="?android:attr/selectableItemBackground"
+            android:id="@+id/dialog_notification_success_button"/>
+
+    </LinearLayout>
+
+</RelativeLayout>

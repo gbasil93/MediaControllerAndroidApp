@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+
+<hardware>
+    <sleeposc enable="true" ppm="31" />
+    <usb enable="false" />
+    <txpower power="15" bias="5" />
+    <script enable="true" />
+    <slow_clock enable="true" />
+    <pmux regulator_pin="7" />
+	<port index="0" tristatemask="0" pull="up" />
+	<otaboot source="internal" />
+</hardware>

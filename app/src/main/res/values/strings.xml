@@ -1,0 +1,55 @@
+<resources>
+    <string name="app_name">Media Controller Utility</string>
+    <string name="bonding">Bonding with the device&#8230;</string>
+    <string name="bonded">The device is now bonded.</string>
+
+    <!-- Navigation Fragment -->
+    <string name="navigation_drawer_open">Open Navigation Drawer</string>
+    <string name="navigation_drawer_close">Close Navigation Drawer</string>
+
+    <!-- Instructions -->
+    <string name="auto_calibration_instructions">
+        To update the sensor calibration, remove the firearm from the holster and press the \'Update Calibration\' button.
+        You can test the detection by viewing the status icon below.
+    </string>
+    <string name="holster_instructions">
+        Holster the firearm
+    </string>
+    <string name="unholster_instructions">
+        Unholster the firearm
+    </string>
+    <string name="instructions_on_finish">
+        Finished calibrating
+    </string>
+    <string name="calibration_warning">
+        Note that if you have made changes in the advanced calibration, updates via this procedure will not revert those adjustments,
+        and you may have unexpected results.
+    </string>
+
+    <string name="calib_value">%1$d / %2$d (%4$+d)</string>
+    <string name="calib_trig_value">%1$d</string>
+    <string name="baseline_value">Baseline Rp:%1$d\t\tL:%2$d</string>
+    <string name="trigger_hdr">Trigger</string>
+    <string name="button_setbase">Capture Baseline</string>
+
+    <string name="default_dfu_filepath">/sdcard/dfu/</string>
+
+    <string-array name="navigation_drawer_items">
+        <item>Calibration</item>
+        <item>DFU</item>
+    </string-array>
+
+    <string name="dfu_connecting">Connecting to device</string>
+    <string name="dfu_connected">Connected to device</string>
+    <string name="dfu_starting">Starting DFU process</string>
+    <string name="dfu_started">Started DFU process</string>
+    <string name="dfu_progress">%1$d %%</string>
+    <string name="dfu_enabling">Enabling DFU on device</string>
+    <string name="dfu_validating">Validating firmware</string>
+    <string name="dfu_disconnecting">Disconnecting from device</string>
+    <string name="dfu_disconnected">Disconnected from device</string>
+    <string name="dfu_complete">DFU complete!</string>
+    <string name="dfu_aborted">DFU aborted</string>
+    <string name="dfu_error">Error: %1$s</string>
+
+</resources>

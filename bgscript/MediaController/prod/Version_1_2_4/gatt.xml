@@ -1,0 +1,152 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<configuration>
+	
+	<service uuid="1800">
+		<description>Generic Access Profile</description>
+		
+		<characteristic uuid="2a00" id="c_device_name">
+			<properties read="true"/>
+			<value>BodyWorn Remote XXXX</value>
+		</characteristic>
+		
+		<characteristic uuid="2a01">
+			<properties read="true" const="true"/>
+			<value type="hex">8001</value>
+		</characteristic>
+	</service>
+	
+	<service uuid="180a">
+		<description>Device Information</description>
+		
+		<characteristic uuid="2a29">
+			<properties read="true" const="true" />
+			<value>Utility Associates</value>
+		</characteristic>
+		
+		<characteristic uuid="2a24">
+			<properties read="true" const="true" />
+			<value>Utility Remote</value>
+		</characteristic>
+		
+		<characteristic uuid="2a26" id="c_firmware_version">
+			<properties read="true"/>
+			<value>0.0.0</value>
+		</characteristic>
+		
+		<characteristic uuid="2a27">
+			<properties read="true" const="true" />
+			<value>1.0</value>
+		</characteristic>
+	</service>
+	
+	<!-- battery service -->
+	 <service uuid="180f">
+        <description>Battery</description>
+        <characteristic uuid="2a19" id="c_battery_measurement">
+            <properties read="true" />
+            <value length="1" type="user" />
+        </characteristic>
+    </service>
+    
+    <!-- config service -->
+	<service uuid="7baf716b-f694-4dd2-b2f7-590df4c2a771">
+		<description>Hardware Config</description>
+        
+        <characteristic uuid="7baf716b-f694-4dd2-b2f7-590df4c2a774" id="c_conn_latency">
+            <description>Slow Connection</description>
+            <properties read="true" write="true" />
+            <value length="1" type="hex">00</value>
+        </characteristic>
+        
+        <characteristic uuid="48d4c728-d9cc-4bc0-b1da-e47fae7a10d2" id="c_conn_latency_value">
+            <description>Latency</description>
+            <properties read="true" write="true" />
+            <value length="1" type="hex">00</value>
+        </characteristic>
+        
+	</service>
+	
+	<!-- remote service -->
+	<service uuid="61ad84b1-9eea-4be4-bc53-c1677c3a54fd">
+		<description>Remote Control</description>
+		
+		<characteristic uuid = "61ad84b1-9eea-4be4-bc53-c1677c3a54fd" id="c_button_status_enhanced">
+			<description>Button Enhanced</description>
+			<properties read="true" write="false" notify="true"/>
+			<value type="hex">000000</value>
+		</characteristic>
+		
+		<characteristic uuid = "61ad84b1-9eea-4be4-bc53-c1677c3a54fe" id="c_button_status">
+			<description>Button</description>
+			<properties read="true" write="false" notify="true"/>
+			<value type="hex">0000</value>
+		</characteristic>
+		
+		<characteristic uuid="61ad84b1-9eea-4be4-bc53-c1677c3a54ff" id="c_rec_status">
+            <description>Recording</description>
+            <properties read="true" write="true" />
+            <value type="hex">00</value>
+        </characteristic>
+        
+        <characteristic uuid="61ad84b1-9eea-4be4-bc53-c1677c3a5500" id="c_rec_status_ack">
+            <description>Recording Ack</description>
+            <properties read="true" notify="true"/>
+            <value type="hex">00</value>
+        </characteristic>
+        
+        <characteristic uuid="da931a03-bee5-4817-bf9e-8b60fdf6ed70" id="c_multipress_enable">
+            <description>Multiple Press Enable Mask</description>
+            <properties read="true" write="true" />
+            <value length="1" type="hex">00</value>
+        </characteristic>
+        
+        <characteristic uuid="a19d99ce-1652-4dfe-8c5e-3593d67ecf79" id="c_longpress_duration">
+            <description>Long Press Down Time</description>
+            <properties read="true" write="true" />
+            <value length="2" type="hex">4000</value>
+        </characteristic>
+        
+        <characteristic uuid="789a689d-3c46-4e3e-8716-80555157d802" id="c_multipress_timeout">
+            <description>Multiple Press Timeout</description>
+            <properties read="true" write="true" />
+            <value length="2" type="hex">4000</value>
+        </characteristic>
+        
+	</service>
+	
+	<service uuid="1d14d6ee-fd63-4fa1-bfa4-8f47b42119f0">
+        <description>OTA Service</description>
+        
+        <!-- Standard OTA endpoints for BLEGUI to work -->
+        <characteristic uuid="f7bf3564-fb6d-4e53-88a4-5e37e0326063" id="xgatt_ota_control">
+            <properties write="true" />
+            <value length="1" type="user" />
+        </characteristic>
+        <characteristic uuid="984227f3-34fc-4045-a5d0-2c581f81a153" id="xgatt_ota_data">
+            <properties write_no_response="true" />
+            <value length="20" />
+        </characteristic>
+
+        <!-- More robust OTA endpoints for Android and iOS (BLEGUI won't work with these) -->
+        <characteristic uuid="00737572-6573-686a-6f73-68692e636f6d" id="xgatt_ota_data_w_response">
+            <properties write="true" />
+            <value length="20" />
+        </characteristic>       
+            <characteristic uuid="01737572-6573-686a-6f73-68692e636f6d" id="xgatt_ota_control_wo_response">
+            <properties write_no_response="true" />
+            <value length="1" type="user" />
+        </characteristic>
+
+    </service>
+    
+    <service uuid="00766963-6172-6173-6f6c-7574696f6e73">
+        <description>Device Control</description>
+        <characteristic uuid="01766963-6172-6173-6f6c-7574696f6e73" id="xgatt_device_reset">
+            <description>Device reset</description>
+            <properties write_no_response="true" />
+            <value length="1" />
+        </characteristic>
+    </service>
+
+	
+</configuration>

@@ -1,0 +1,52 @@
+event sm_bonding_fail(handle, result)
+ 
+    # If bonding fails, handle it gracefully based on the following possible results:
+    # - 0x018B - Out of bonds (no space left, all 8 bonding slots taken)
+    # - 0x0205 - Authentication failure (shouldn't happen with "just works" mode, but might otherwise)
+    # - 0x0206 - Pin or key missing (probably local or remote device is missing the key, but not both)
+    # - 0x0301 - Passkey entry failed (also shouldn't happen in "just works" mode unless bonding is cancelled)
+    # - 0x0302 - OOB data not available (only occurs if OOB is required and not supported on both ends)
+    # - 0x0303 - Authentication requirements (I/O capabilities required but not supported)
+    # - 0x0304 - Confirm value failed (PIN entry/comparison attempted but failed)
+    # - 0x0305 - Pairing not supported (also occurs if bond info removed from remote device but not local module)
+    # - 0x0306 - Encryption key size (key size insufficient to meet security requirements)
+    # - 0x0307 - Command not supported (SMP command is not supported on this device)
+    # - 0x0308 - Unspecified reason (may occur if bond info is present remotely but not locally)
+    # - 0x0309 - Repeated attempts (too little time has elapsed since last pairing/security request)
+    # - 0x030A - Invalid parameters (bad parameters sent during pairing/bonding process)
+ 
+    # NOTE: The most common cases:
+    # - 0x018B, which means you ran out of space and must remove at least one bond in order to bond again
+    # - 0x0206, which typically means the pairing info was removed on the remote device but not locally
+    # - 0x0301, which typically means the user cancelled the pairing request or entered the wrong passkey
+    # - 0x0305, which is like 0x0206 but is often generated instead if the remote device is a smartphone
+    # - 0x0308, which typically means the pairing info was removed on the local device but not remotely
+    if result = $018b then
+        # Only solved by removing bonds - requires the user to reset the bonds...
+    end if
+ 
+    if result = $0301 then
+        # Usually solved simply by trying again
+        # Seems to solve most problems on iOS 
+        # On Android, pairing rejected a few times if Android deleted pairing without informing device
+        call sm_encrypt_start(0, 1)
+    end if
+ 
+    if result = $0305 || result = $0206 then
+        # Remove local bonding info first, then the remote device needs to reconnect
+        # If current_bond_handle is $ff, that means we don't have a bonding handle - so not much we can do
+        if current_bond_handle != $ff then
+            call sm_delete_bonding(current_bond_handle)
+        end if
+ 
+        # Sometimes takes a few tries
+        call connection_disconnect(0)
+    end if
+ 
+    if result = $0308 then
+        # Remove remote bonding info first, then the remote device needs to reconnect
+        # Android can recover automatically, iOS cannot
+        # Instead of disconnecting, just force a re-encryption... Usually works
+        call sm_encrypt_start(0, 1)
+    end if
+end

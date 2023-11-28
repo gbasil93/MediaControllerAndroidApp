@@ -1,0 +1,17 @@
+c_device_name 3
+c_firmware_version 12
+c_battery_measurement 17
+c_conn_latency 20
+c_conn_latency_value 23
+c_button_status_enhanced 27
+c_button_status 31
+c_rec_status 35
+c_rec_status_ack 38
+c_multipress_enable 42
+c_longpress_duration 45
+c_multipress_timeout 48
+xgatt_ota_control 52
+xgatt_ota_data 54
+xgatt_ota_data_w_response 56
+xgatt_ota_control_wo_response 58
+xgatt_device_reset 61

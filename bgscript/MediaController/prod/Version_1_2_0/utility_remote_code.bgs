@@ -1,0 +1,792 @@
+# OTA Variables
+dim command
+dim dfu_pointer  # current pointer to flash location to upload firmware
+dim erase_page   # current page to erase
+const MAX_ERASE_PAGE = 64
+
+const FIRMWARE_VERSION() = "1.2.0"
+
+#declare buffers for building attribute values
+dim tmp(1)
+dim button_tmp(2)
+dim ack_tmp(1)
+dim name_tmp(20)
+dim mac_addr(6)
+dim version_tmp(5)
+
+#battery handle and field
+dim batconn_handle
+dim batresult
+
+#state variables
+dim connected
+dim recording
+dim pairing
+dim buttonStatus
+dim pairing_led
+
+#connection props
+dim conn_handle
+dim conn_interval_orig
+dim conn_timeout
+dim conn_latency
+dim pairing_time
+dim current_bond_handle
+dim slow_connection
+dim high_latency_value
+
+# button props
+dim multipress_enables
+dim multipress_running
+dim current_multipress_button
+dim current_multipress_count
+dim last_key_down_ts
+dim duration_tmp(2)
+dim long_press_window
+dim multipress_window
+
+# persistent storage variables
+dim load_result
+dim load_len
+
+# button press timeout counter
+dim btn_press_timeout_counter
+dim button_held_down
+dim button_status_result
+dim button_status_port
+dim button_status_state
+
+const PAIRING_PRESS_TIME = 163840
+const PAIRING_DURATION = 600
+const ENCRYPTION_TIMEOUT_SECONDS = 1
+const BUTTON_PRESS_TIMEOUT_SECONDS = 10
+const ENCRYPTION_TIMER_HANDLE = 0
+const STATUS_TIMER_HANDLE = 13
+const PAIRING_TIMER_HANDLE = 14
+const PAIRING_SUCCESS_TIMER_HANDLE = 15
+const MULTIPRESS_TIMER = 16
+const LONG_PRESS_TIMER = 17
+const PAIRING_PRESS_TIMER = 18
+const TOO_LONG_PRESS_TIMER = 19
+
+const BUTTON_KEY_DOWN = 1
+const BUTTON_KEY_UP = 2
+const BUTTON_MULTIPRESS = 3
+const BUTTON_LONGPRESS = 4
+
+const PS_KEY_LATENCY = $8000
+const PS_KEY_MULTIPRESS_MASK = $8001
+
+dim red_led
+
+# -------------------------------
+# Configure Device Name
+# -------------------------------
+procedure setup_device_name()
+
+    #Get local BT address
+    call system_address_get()(mac_addr(0:6))
+
+    # Update the device_name to include the last 4 digits of the mac address
+    name_tmp(19:1) = (mac_addr(0:1)&$f) + 48 + ((mac_addr(0:1)&$f )/10*7)
+    name_tmp(18:1) = (mac_addr(0:1)/$10)+ 48 + ((mac_addr(0:1)/$10)/10*7)
+    name_tmp(17:1) = (mac_addr(1:1)&$f) + 48 + ((mac_addr(1:1)&$f )/10*7)
+    name_tmp(16:1) = (mac_addr(1:1)/$10) + 48 + ((mac_addr(1:1)/$10)/10*7)
+
+    name_tmp(0:16) = "BodyWorn Remote "
+    call attributes_write(c_device_name, 0, 20, name_tmp(0:20))
+end
+
+# -------------------------------
+# Configure Firmware Version
+# -------------------------------
+procedure setup_firmware_version()
+    call attributes_write(c_firmware_version, 0, 5, FIRMWARE_VERSION(0:5))
+end
+
+# -------------------------------
+# Setup LED
+# -------------------------------
+procedure setup_led()
+	# Configure port 0.6, 0.7 as output
+	call hardware_io_port_config_direction(0, $C0)
+
+    # Write 0 so they are initially off
+	call hardware_io_port_write(0, $C0, 0)
+end
+
+
+# -------------------------------
+# Setup Buttons
+# -------------------------------
+procedure setup_buttons()
+	# enable interrupt on port 0 pins 0-5 rising edge
+
+    # (parameters are port=0, bitmask=0b00111111, edge=falling)
+    call hardware_io_port_config_irq(0, $3F, 1)
+
+    # enable interrupt on port 1 pins 0-5 rising
+    call hardware_io_port_config_irq(1, $3F, 0)
+end
+
+
+# -------------------------------
+# Toggle Recording LED
+# -------------------------------
+procedure toggle_record_led(enable)
+	if enable = 1
+		call hardware_io_port_write(0, $80, $80)
+	end if
+	if enable = 0
+		call hardware_io_port_write(0, $80, 0)
+	end if
+end
+
+
+# -------------------------------
+# Toggle Connection LED
+# -------------------------------
+procedure toggle_connection_led(enable)
+	if enable = 1
+		call hardware_io_port_write(0, $40, $40)
+	end if
+	if enable = 0
+		call hardware_io_port_write(0, $40, 0)
+	end if
+end
+
+# -------------------------------
+# Load Configurations
+# -------------------------------
+procedure load_configurations()
+
+    # Load latency value
+    call flash_ps_load(PS_KEY_LATENCY)(load_result, load_len, tmp(0:1))
+
+    # Default the value if the read failed
+	if load_result > 0 then
+        high_latency_value = 130
+    else
+        high_latency_value = tmp(0:1)
+	end if
+
+	call attributes_write(c_conn_latency_value,0,1,high_latency_value)
+
+	# Load multipress mask
+	call flash_ps_load(PS_KEY_MULTIPRESS_MASK)(load_result, load_len, tmp(0:1))
+
+    # Default the value if the read failed
+	if load_result > 0 then
+        multipress_enables = $20
+    else
+        multipress_enables = tmp(0:1)
+	end if
+
+	call attributes_write(c_multipress_enable,0,1,multipress_enables)
+end
+
+# -------------------------------
+# Start Single Shot Timer
+# -------------------------------
+procedure start_single_shot_timer(time, handle)
+	# Start a timer with interval and handle id and single shot
+    # args time*(1/32768 sec), handle, singleshot
+	call hardware_set_soft_timer(time, handle, 1)
+end
+
+# -------------------------------
+# Show LED Status
+# -------------------------------
+procedure show_led_status()
+	if connected = 1 then
+		if recording = 1 then
+		    call toggle_record_led(1)
+		    call start_single_shot_timer($4000, 1)
+		else
+		    call toggle_connection_led(1)
+		    call start_single_shot_timer($4000, 2)
+		end if
+	else
+	    call toggle_connection_led(1)
+	    call start_single_shot_timer($CCC, 3)
+	end if
+end
+
+# -------------------------------
+# Process to start pairing
+# -------------------------------
+procedure pairing_buttons_pressed()
+    pairing = 1
+    # delete previous bonds
+    call sm_delete_bonding(current_bond_handle)
+	call sm_delete_bonding($ff)
+
+	# Speed up the advertising interval during pairing to make it easier to see
+	call gap_set_adv_parameters($80, $80, 7)
+
+	# Start advertising discoverable so that masters can connect
+	call gap_set_mode(gap_general_discoverable, gap_undirected_connectable)
+	# set 100ms repeating timer for toggling leds
+	call hardware_set_soft_timer($CCC, PAIRING_TIMER_HANDLE, 0)
+
+	# enable bondable mode
+	call sm_set_bondable_mode(1)
+
+end
+
+# -------------------------------
+# Stop pairing
+# -------------------------------
+procedure stop_pairing()
+    pairing = 0
+    # stop the timer
+	call hardware_set_soft_timer(0, PAIRING_TIMER_HANDLE, 0)
+	# turn off the leds
+	call toggle_connection_led(0)
+	call toggle_record_led(0)
+	pairing_time = 0
+
+	# Stop advertising
+	call gap_set_mode(gap_non_discoverable, gap_non_connectable)
+	# Slow the advertising interval now that pairing is done
+	call gap_set_adv_parameters($800, $800, 7)
+end
+
+# -------------------------------
+# Reset variables
+# -------------------------------
+procedure reset_variables()
+	connected = 0
+	recording = 0
+	batconn_handle=$ff
+
+	# reset recording gatt characteristic
+	call attributes_write(c_rec_status,0,1,0)
+
+	# reset latency and button configurations
+	call load_configurations()
+
+	# Load multipress timeout
+    multipress_window = $4000
+	# Load the value into a buffer to be displayed properly
+	duration_tmp(0:1) = multipress_window >> 8
+	duration_tmp(1:1) = multipress_window & $ff
+	call attributes_write(c_multipress_timeout,0,2,duration_tmp(0:2))
+
+	# Load long press duration
+    long_press_window = $4000
+
+    # Load the value into a buffer to be displayed properly
+	duration_tmp(0:1) = long_press_window >> 8
+	duration_tmp(1:1) = long_press_window & $ff
+
+    call attributes_write(c_longpress_duration,0,2,duration_tmp(0:2))
+
+end
+
+# -------------------------------
+# System boot event
+# -------------------------------
+event system_boot(major, minor, patch, build, ll_version, protocol, hw)
+
+    # Erase internal flash dedicated for OTA
+    # For this to work, the script timeout has to be increased from the default
+    # value in application configuration file (config.xml)
+    erase_page = 0
+
+    while erase_page < MAX_ERASE_PAGE
+        call flash_erase_page(erase_page)
+        erase_page = erase_page + 1
+    end while
+
+    dfu_pointer = 0
+    batconn_handle=$ff
+
+    # use the MAC address to give this device a unique name
+    call setup_device_name()
+
+    # Configure LED for output
+	call setup_led()
+
+	# Configure Buttons for input
+	call setup_buttons()
+
+    # Set advertisement interval to 125ms.
+	# Use all three advertisement channels
+	# args: min time, max time, channel enables in hex (111)
+	call gap_set_adv_parameters($800, $800, 7)
+
+	# Start advertising not discoverable so that previous masters can connect
+	call gap_set_mode(gap_non_discoverable, gap_directed_connectable)
+
+	# enable bondable mode
+	call sm_set_bondable_mode(1)
+
+	# set firmware version
+	call setup_firmware_version()
+
+	# Reset variables
+	call reset_variables()
+
+end
+
+# -------------------------------
+# Adjust the connection properties for better battery life
+# -------------------------------
+procedure slow_connection()
+    call connection_update(conn_handle, 40, 40, high_latency_value, 1400)
+end
+
+# -------------------------------
+# Adjust the connection properties for better battery life
+# -------------------------------
+procedure fast_connection()
+    call connection_update(conn_handle, 40, 40, 0, conn_timeout)
+end
+
+# -------------------------------
+# Disconnect event
+# -------------------------------
+event connection_disconnected(handle, result)
+    # Start advertising not discoverable so that previous masters can connect
+	call gap_set_mode(gap_non_discoverable, gap_directed_connectable)
+	call reset_variables()
+	call show_led_status()
+end
+
+# -------------------------------
+# Connection event
+# -------------------------------
+event connection_status(connection, flags, address, address_type, conn_interval, timeout, latency, bonding)
+    # Device is connected.
+    if pairing = 1 then
+        call stop_pairing()
+        # Store current bond handle
+        current_bond_handle = bonding
+    else
+        # If not pairing and not bonded, unwanted connection, disconnect
+        if bonding = $ff then
+            call connection_disconnect(connection)
+        end if
+    end if
+
+    # If the connection is complete and encrypted, device connected
+    if flags & $02 then
+        if connected = 0 then
+            call start_single_shot_timer($CCC,STATUS_TIMER_HANDLE)
+        end if
+        # set connection variable for status
+        connected = 1
+    end if
+end
+
+# -------------------------------
+# Write button value to GATT
+# -------------------------------
+procedure write_button_value(button_value)
+
+    # put button value in payload
+	button_tmp(0:1) = button_value
+
+    # put battery value in payload
+	button_tmp(2:1) = batresult
+
+    # write value to GATT database
+	call attributes_write(c_button_status,0,2,button_tmp(0:2))
+end
+
+# -------------------------------
+# Write enhanced button value to GATT
+# -------------------------------
+procedure write_button_value_enhanced(button_value, button_state)
+    # put button value in payload
+	button_tmp(0:1) = button_value
+
+    # put battery value in payload
+	button_tmp(1:1) = batresult
+
+    # put button state in payload
+	button_tmp(2:1) = button_state
+
+    # write value to GATT database
+	call attributes_write(c_button_status_enhanced,0,3,button_tmp(0:3))
+end
+
+# -------------------------------
+# Write recording ack value to GATT
+# -------------------------------
+procedure write_ack_value()
+    # put button value in payload
+	ack_tmp(0:1) = recording
+	# write value to GATT database
+	call attributes_write(c_rec_status_ack,0,1,ack_tmp(0:1))
+end
+
+# -------------------------------
+# Callback when a button is pressed
+# -------------------------------
+event hardware_io_port_status(timestamp, port, irq, state)
+    # Write the old way of reporting buttons
+    call write_button_value(state)
+
+    # Process buttons the new way
+    # If key down
+    if (state & irq) = 0 then
+
+        # track the button pressed
+        buttonStatus = (state ^ $ff) & $3f
+
+        # check if multipress timer running and stop it
+        if (multipress_running > 0) then
+            # stop the multipress timer
+            call start_single_shot_timer($0, MULTIPRESS_TIMER)
+            multipress_running = 0
+
+            # check if the multipress timer is for this key
+            if (buttonStatus != current_multipress_button) then
+                # send the previous button event
+                call write_button_value_enhanced(current_multipress_button, BUTTON_KEY_UP)
+            end if
+        end if
+
+        # Write the key down event
+        call write_button_value_enhanced(buttonStatus, BUTTON_KEY_DOWN)
+        # Start a timer for long press
+        call start_single_shot_timer(long_press_window, LONG_PRESS_TIMER)
+        # Start a timer for the pairing buttons
+        if buttonStatus = $0C then
+            call start_single_shot_timer(PAIRING_PRESS_TIME, PAIRING_PRESS_TIMER)
+        else
+            call start_single_shot_timer(0, PAIRING_PRESS_TIMER)
+        end if
+        # Start a timer for extended pressed
+        call start_single_shot_timer($1e000, TOO_LONG_PRESS_TIMER)
+
+        # Set the last keydown timestamp
+        last_key_down_ts = timestamp
+    else
+      # cancel too long press Timer
+      call start_single_shot_timer(0, TOO_LONG_PRESS_TIMER)
+        call write_button_value_enhanced(buttonStatus, BUTTON_KEY_UP)
+    	# Check if the long press duration hasn't passed
+    	if ((timestamp - last_key_down_ts) < long_press_window) then
+    	    # Cancel the long press timer
+            call start_single_shot_timer(0, LONG_PRESS_TIMER)
+    		# check if multipress enabled for this key
+        	if (irq & multipress_enables) then
+                # check if the multipress timer is for this key, if not zero it
+                if (buttonStatus != current_multipress_button) then
+                    current_multipress_count = 0
+                end if
+
+                # set the multipress button tracker and increment the count
+                current_multipress_button = buttonStatus
+                current_multipress_count = current_multipress_count + 1
+
+                # check if the threshold has been met
+                if (current_multipress_count > 2) then
+                    # Send the multipress value
+                    call write_button_value_enhanced(buttonStatus, BUTTON_MULTIPRESS)
+                    current_multipress_count = 0
+                else
+                    # Start a new timer
+                    call start_single_shot_timer(multipress_window, MULTIPRESS_TIMER)
+                    multipress_running = 1
+                end if
+            # else
+            #     # Write the key up event
+            #     call write_button_value_enhanced(buttonStatus, BUTTON_KEY_UP)
+            end if
+
+            # Check if the current button(s) trigger status indicator
+            if buttonStatus = $02 then
+                call start_single_shot_timer($1998, STATUS_TIMER_HANDLE)
+            end if
+        end if
+        call start_single_shot_timer(0, PAIRING_PRESS_TIMER)
+
+    end if
+
+    # request a new battery read
+    call hardware_adc_read(15,3,0)
+
+end
+
+
+# -------------------------------
+# Callback when timer expires
+# -------------------------------
+event hardware_soft_timer(handle)
+
+	if handle = 1 then
+	    call toggle_record_led(0)
+	end if
+
+	if handle = 2 then
+	    call toggle_connection_led(0)
+	end if
+
+	if handle = 3 then
+		call toggle_connection_led(0)
+		call start_single_shot_timer($CCC,4)
+	end if
+
+	if handle = 4 then
+		call toggle_connection_led(1)
+		call start_single_shot_timer($CCC,5)
+	end if
+
+	if handle = 5 then
+		call toggle_connection_led(0)
+		call start_single_shot_timer($CCC,6)
+	end if
+
+	if handle = 6 then
+		call toggle_connection_led(1)
+		call start_single_shot_timer($CCC,7)
+	end if
+
+	if handle = 7 then
+		call toggle_connection_led(0)
+		call start_single_shot_timer($CCC,8)
+	end if
+
+	if handle = 8 then
+		call toggle_connection_led(1)
+		call start_single_shot_timer($CCC,9)
+	end if
+
+	if handle = 9 then
+		call toggle_connection_led(0)
+		call start_single_shot_timer($CCC,10)
+	end if
+
+	if handle = 10 then
+		call toggle_connection_led(1)
+		call start_single_shot_timer($CCC,11)
+	end if
+
+	if handle = 11 then
+		call toggle_connection_led(0)
+	end if
+
+	if handle = STATUS_TIMER_HANDLE
+		call show_led_status()
+	end if
+
+  # 100 ms repeating timer
+	if handle = PAIRING_TIMER_HANDLE
+    # button has been held down for > threshold
+    if button_held_down = 1 then
+      # enable pull on port 0
+      call hardware_io_port_config_pull(0, $00, 1)
+      # check button states
+      call hardware_io_port_read(0, $ff)(button_status_result, button_status_port, button_status_state)
+      buttonStatus = (button_status_state ^ $ff) & $3f
+      # set tristate enable for any buttons not currently down
+      call hardware_io_port_config_pull(0, buttonStatus, 1)
+      # if all buttons are released, kill the flag
+      if buttonStatus = $00 then
+        button_held_down = 0
+      end if
+    end if
+		if pairing_time < PAIRING_DURATION then
+		    # Blink light
+		    if pairing_led = 0 then
+		    	call toggle_connection_led(1)
+ 		    	call toggle_record_led(0)
+		    	pairing_led = 1
+		    else
+		        call toggle_connection_led(0)
+		    	call toggle_record_led(1)
+		    	pairing_led = 0
+		    end if
+		    #increment counter
+		    pairing_time = pairing_time + 1
+		else
+		    call stop_pairing()
+		end if
+	end if
+
+	if handle = PAIRING_SUCCESS_TIMER_HANDLE
+		call toggle_connection_led(0)
+	end if
+
+	if handle = MULTIPRESS_TIMER then
+	    call write_button_value_enhanced(current_multipress_button, BUTTON_KEY_UP)
+	    current_multipress_count = 0
+	end if
+
+	if handle = LONG_PRESS_TIMER then
+	    call write_button_value_enhanced(buttonStatus, BUTTON_LONGPRESS)
+
+        # Check if the current button(s) trigger status indicator
+        if buttonStatus = $02 then
+            call start_single_shot_timer($1998, STATUS_TIMER_HANDLE)
+        end if
+	end if
+
+	if handle = PAIRING_PRESS_TIMER then
+	    # If it is the pairing button combo start pairing
+	    if buttonStatus = $0C then
+            call pairing_buttons_pressed()
+        end if
+	end if
+
+  if handle = TOO_LONG_PRESS_TIMER then
+    # if there is a button still held down
+    if buttonStatus != $00 then
+      button_held_down = 1
+    end if
+  end if
+end
+
+# -------------------------------
+# Callback when user requests a battery read
+# -------------------------------
+event attributes_user_read_request(connection, handle, offset, maxsize)
+	batconn_handle=connection
+	#start measurement, read VDD/3, 9 effective bits
+	call hardware_adc_read(15,3,0)
+end
+
+# -------------------------------
+# Callback when adc is read
+# -------------------------------
+event hardware_adc_result(input,value)
+    #scale value to range 0-100
+	#measurement range is 32768=1.15v*3=3.45V
+	#new battery ADC measurement is 20912=2.52v
+	#minimum battery voltage is 2.0 volts=2.0v/3.45v*32768= 18996
+	#20912-18996=1916
+
+	batresult = (value - 17616) * 100 / (26426 - 17616)
+
+	#clip to 100%
+	if batresult>100 then
+		batresult=100
+	end if
+	if batresult<0 then
+	    batresult=0
+	end if
+
+	tmp(0:1)=batresult
+
+	if batconn_handle<$ff then
+		#if connection handle is valid
+		call attributes_user_read_response(batconn_handle,0,1,tmp(0:1))
+		batconn_handle=$ff
+	end if
+end
+
+# Handles OTA Control Point Attribute (commands) and OTA Data Attribute (firmware update) writes
+# and performs the necessary actions
+procedure handle_ota_control(connection, offset, value_len, value_data())
+    # Check if OTA control point attribute is written by the remote device and execute the command
+        # Command 0 : Erase flash block 0 (0x0-0x1FFFF)
+        # Command 1 : Erase flash block 1 (0x10000-0x3FFFF)
+        # Command 2 : Reset DFU data pointer
+        # Command 3 : Boot to DFU mode
+        # Command 4 : Power up external flash
+    # In case of errors application error code 0x80 is returned to the remote device
+    # In case the flash comms fails error code 0x90 is returned to the remote device
+
+    # Attribute is user attribute, reason is always write_request_user
+    if value_len > 1 || offset > 0 then
+        # Not a valid command -> report application error code : 0x80
+        call attributes_user_write_response(connection, $80)
+    else
+        command = value_data(0:1)
+
+        if command > 4 then # Unknown command -> report application error code : 0x80
+            call attributes_user_write_response(connection, $80)
+        else
+            if command = 3 then # Command 3 received -> Boot to DFU mode
+                call system_reset(1)
+            else
+            	if command = 2 then
+                    dfu_pointer = 0
+            	else
+            		# Other commands are not used, but still accepted in order
+                	# to be compatible with the external flash OTA
+                	# implementation
+                	call attributes_user_write_response(connection, $0)
+            	end if
+
+            end if
+        end if
+    end if
+end
+
+# Incoming data event listener
+event attributes_value(connection, reason, handle, offset, value_len, value_data)
+
+    if (handle = xgatt_device_reset) then
+        command=value_data(0:1)
+        # Command 1 received, reset device
+        if command=1 then
+            call system_reset(0)
+        end if
+    end if
+
+    # Both ota_control endpoints run the same code, however, the wo_response just ignores most of this
+    if handle = xgatt_ota_control || handle = xgatt_ota_control_wo_response then
+        call handle_ota_control(connection, offset, value_len, value_data(0:value_len))
+    end if
+
+    # Check if OTA data attribute is written which carries the firmware update
+    # and store the data to the internal flash
+    if handle = xgatt_ota_data || handle = xgatt_ota_data_w_response then
+        call flash_write_data(dfu_pointer, value_len, value_data(0:value_len))
+        dfu_pointer = dfu_pointer + value_len
+    end if
+
+    # Set the recording state for the recording led
+    if handle = c_rec_status then
+        recording = value_data(0:1)
+        call write_ack_value()
+    end if
+
+    # Slow the connection to save battery
+    if handle = c_conn_latency then
+        slow_connection = value_data(0:1)
+        if slow_connection = 1 then
+            call slow_connection()
+        else
+            call fast_connection()
+        end if
+    end if
+
+    # Called when the multiple press enable mask is set
+    if handle = c_multipress_enable then
+        multipress_enables = value_data(0:1)
+        call flash_ps_save(PS_KEY_MULTIPRESS_MASK, 1, value_data(0:1))
+    end if
+
+    # Called when the long press duration is set
+    if handle = c_longpress_duration then
+        # Gatt char is 2 bytes, need to shift first byte and logical OR to get 16 bytes
+        long_press_window = (value_data(0:1) << 8) | value_data(1:1)
+    end if
+
+    # Called when the multipress timeout is set
+    if handle = c_multipress_timeout then
+        # Gatt char is 2 bytes, need to shift first byte and logical OR to get 16 bytes
+        multipress_window = (value_data(0:1) << 8) | value_data(1:1)
+    end if
+
+    # Called to change the latency of the slow connection
+    if handle = c_conn_latency_value then
+        if high_latency_value != value_data(0:1) then
+            high_latency_value = value_data(0:1)
+            if high_latency_value > 250 then
+                high_latency_value = 250
+            end if
+    	    call flash_ps_save(PS_KEY_LATENCY, 1, high_latency_value)
+    	    # Call slow connection to apply the update
+    	    if slow_connection = 1 then
+                call slow_connection()
+            end if
+        end if
+    end if
+end
